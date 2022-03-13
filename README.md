@@ -1,2 +1,3 @@
-# bda
-Working through Bayesian Data Analysis 
+# Bayes 
+
+Contains various exploration and learning examples of Bayesian analyses.
