@@ -1,0 +1,222 @@
+---
+Title: Chapter 4 Linear Regression
+Author: Ryan Gan
+Date: 2023-07-01
+format:
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+editor: visual
+---
+
+## Intro
+
+Working through chapter 4 on simple linear regression.
+
+[Book Github](https://github.com/MatsuuraKentaro/Bayesian_Statistical_Modeling_with_Stan_R_and_Python/tree/master)
+
+```{r setup, messages=FALSE, warnings=FALSE}
+# Libraries
+library(tidyverse)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)
+color_scheme_set("viridis")
+```
+
+Loading salary data.
+
+```{r load_data}
+
+salary = read_csv('./bayes_stats_modeling/04-linear_regression/data/data-salary.csv')
+
+head(salary)
+```
+
+Scatter plot of salary.
+
+```{r scatter_plot}
+ggplot(data = salary, aes(x = X, y = Y)) +
+  geom_point(color = 'darkblue') +
+  xlab('Year') +
+  ylab('Salary $1k') +
+  theme_bw()
+
+```
+
+**Model Formula 4.1**
+
+Where $n = 1,...,N$
+
+$$
+Y[n] = y_{\text{base}}[n] + \epsilon[n] \\
+y_{\text{base}} = \alpha + b X[n] \\
+\epsilon[n] \backsim N(0,\mu)
+$$ {#eq-salary-model}
+
+Can be reduced to the parameters to be estimated...
+
+$$
+Y[n] \backsim N(\mu = \alpha + bX[n], \sigma)
+$$
+
+### Maximum likelihood estimation of the model
+
+Can model using lm function or glm.
+
+```{r mle_mod}
+
+# linear model
+res_lm = lm(Y ~ X, data = salary)
+
+summary(res_lm)
+```
+
+Confidence and prediction intervals from the linear model.
+
+```{r mle_intervals}
+# prediction dataframe
+X_pred = data.frame(X = 1:28)
+# confidence interval
+conf_95 = predict(res_lm , X_pred, interval = 'confidence')
+# prediction interval
+pred_95 = predict(res_lm, X_pred, interval = 'prediction')
+# plot data
+plot_data = cbind(X_pred, conf_95)
+# prediction data
+pred_data = cbind(X_pred, pred_95)
+
+ggplot() +
+  geom_point(
+    data = salary, 
+    aes(x = X, y = Y), 
+    color = 'darkblue'
+  ) +
+  geom_line(
+    data = plot_data, 
+    aes(x = X, y = fit), 
+    color = 'darkblue'
+    ) +
+  geom_ribbon(
+    data = plot_data, 
+    aes(x = X, ymin = lwr, ymax = upr), 
+    alpha = 0.5, 
+    fill = 'lightblue'
+    ) +
+  geom_ribbon(
+    data = pred_data, 
+    aes(x = X, ymin = lwr, ymax = upr), 
+    alpha = 0.2, 
+    fill = 'lightblue',
+    color = 'lightblue',
+    linetype = 'dashed'
+    ) +
+  labs(x = 'Year of Experience', y = 'Salary 1k$') +
+  theme_bw()
+  
+
+```
+
+### Bayesian linear model in STAN
+
+Fitting of model 4 defined in stan folder.
+
+```{r stan_model_4}
+# data as a list
+d = list(N = nrow(salary), X = salary$X , Y = salary$Y)
+
+# load model
+model.4 = cmdstan_model(
+  stan_file = 'bayes_stats_modeling/04-linear_regression/stan/model4.stan'
+  )
+
+# fit model to data
+fit.4 = model.4$sample(data = d, seed = 123)
+
+# get posterior draws
+# default is a 3-D draws_array object from the posterior package
+# iterations x chains x variables
+draws_arr <- fit.4$draws() # or format="array"
+str(draws_arr)
+
+```
+
+Summary of model.
+
+```{r stan_model_4_summary}
+# cmdstan_summary give more detail than fit.4$summary()
+fit.4$cmdstan_summary() 
+```
+
+Plot of parameters.
+
+```{r stan_model_4_param_plot}
+mcmc_hist(fit.4$draws())
+```
+
+Example of how to save model results can be found on page 52, section 4.2.3. Skipping that here.
+
+```{r model_4_trace_plot}
+
+mcmc_trace(fit.4$draws())
+```
+
+### Example of maximum likelihood estimation
+
+Simulation of simple linear example.
+
+```{r sample_data}
+set.seed(321)
+# Sample size 
+sample_size = 1000
+# Vector of X 
+x = rnorm(sample_size, mean = 0 , sd = 2)
+# True parameters
+true_beta0 = 2
+true_beta1 = 5
+# Relationship with Y
+y = true_beta0 + true_beta1 * x + rnorm(sample_size, mean = 0, sd = 2)
+
+```
+
+Plot of sample data.
+
+```{r plot_sample_data}
+
+p = ggplot(data = tibble(x,y), aes(x,y)) +
+    geom_point() +
+    theme_bw()
+
+p
+```
+
+```{r neg_log_like_example}
+# Define the negative log-likelihood function for the linear regression model
+neg_log_likelihood_function <- function(parameters) {
+  beta0 <- parameters[1]
+  beta1 <- parameters[2]
+  
+  # Calculate the predicted values using the current parameter estimates
+  y_pred <- beta0 + beta1 * x
+  
+  # Calculate the negative log-likelihood using the normal distribution assumption for errors
+  neg_log_likelihood <- -sum(dnorm(y, mean = y_pred, sd = 10, log = TRUE))
+  
+  return(neg_log_likelihood)
+}
+
+# Use true parameters as initial guesses for beta0 and beta1
+initial_guess <- c(5, 2)
+
+# Find the maximum likelihood estimates using the 'nlm' function
+mle_result <- nlm(f = neg_log_likelihood_function, p = initial_guess)
+
+# Extract the parameter estimates from the optimization result
+mle_beta0 <- mle_result$estimate[1]
+mle_beta1 <- mle_result$estimate[2]
+
+# Print the estimated beta0 and beta1
+cat(sprintf("Estimated beta0: %.2f , true beta0: %.2f ", mle_beta0, true_beta0))
+cat(sprintf("Estimated beta1: %.2f , true beta1: %.2f ", mle_beta1, true_beta1))
+
+```
