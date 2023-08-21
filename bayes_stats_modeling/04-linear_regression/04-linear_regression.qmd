@@ -1,7 +1,7 @@
 ---
-Title: Chapter 4 Linear Regression
-Author: Ryan Gan
-Date: 2023-07-01
+Title: "Chapter 4 Linear Regression""
+Author: "Ryan Gan""
+Date: "2023-07-01""
 format:
   html:
     code-fold: true
@@ -16,6 +16,8 @@ Working through chapter 4 on simple linear regression.
 [Book Github](https://github.com/MatsuuraKentaro/Bayesian_Statistical_Modeling_with_Stan_R_and_Python/tree/master)
 
 ```{r setup, messages=FALSE, warnings=FALSE}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
 # Libraries
 library(tidyverse)
 library(cmdstanr)
@@ -24,11 +26,11 @@ library(bayesplot)
 color_scheme_set("viridis")
 ```
 
-Loading salary data.
+Loading salary data. Note, path may change when trying to render or work interactively.
 
 ```{r load_data}
-
-salary = read_csv('./bayes_stats_modeling/04-linear_regression/data/data-salary.csv')
+# interactive path 
+salary = read_csv('./data/data-salary.csv')
 
 head(salary)
 ```
@@ -127,7 +129,7 @@ d = list(N = nrow(salary), X = salary$X , Y = salary$Y)
 
 # load model
 model.4 = cmdstan_model(
-  stan_file = 'bayes_stats_modeling/04-linear_regression/stan/model4.stan'
+  stan_file = './stan/model4.stan'
   )
 
 # fit model to data
@@ -159,6 +161,329 @@ Example of how to save model results can be found on page 52, section 4.2.3. Ski
 ```{r model_4_trace_plot}
 
 mcmc_trace(fit.4$draws())
+```
+
+Note, section 4.2.4 has some useful notes on adjusting the MCMC settings.
+
+### Using the posterior
+
+Can use the \$draw function to extract draws.
+
+```{r draw_mcmc}
+# draw model 4 as dataframe
+draw_model4 = fit.4$draws(format = "df")
+# can also use 'format = "matrix"' if you'd like the matrix
+```
+
+Can calculate desired quantiles.
+
+```{r mcmc_quant}
+quantile(draw_model4$b, probs = c(0.025, 0.975))
+```
+
+Plot of posterior draws of alpha and beta.
+
+```{r mcmc_parameter_plot}
+
+ggplot(draw_model4, aes( x = a , y = b)) +
+  geom_point(color = 'darkblue') +
+  theme_bw()
+```
+
+#### Bayesian credible intervals and prediction intervals
+
+```{r bayes_ci}
+N_ms = nrow(draw_model4)
+y10_base = draw_model4$a + draw_model4$b * 10
+y10_pred = rnorm(n = N_ms, mean = y10_base, sd = draw_model4$sigma)
+
+ggplot() +
+  geom_density(
+    mapping = aes(y10_base, color = '95% Credible Interval')
+    ) +
+  geom_density(
+    mapping = aes(y10_pred, color = '95% Prediction Interval')
+    ) +
+  scale_color_manual( values = c('darkblue', 'lightblue')) +
+  theme_minimal()
+
+```
+
+Bayesian confidence intervals from posterior.
+
+```{r bayes_ci_from_post}
+
+N_ms = nrow(draw_model4)
+Xp = seq(0, 28, by = 1)
+Np = length(Xp)
+
+set.seed(123)
+
+yp_base_ms = matrix(nrow=N_ms, ncol=Np)
+yp_ms = matrix(nrow=N_ms, ncol=Np)
+
+for (n in 1:Np) {
+  yp_base_ms[,n] = draw_model4$a + draw_model4$b * Xp[n]
+  yp_ms[,n] = rnorm(n=N_ms, mean=yp_base_ms[,n], sd=draw_model4$sigma)
+}
+
+
+qua = apply(yp_base_ms, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est = data.frame(X=Xp, t(qua), check.names = FALSE)
+
+
+p = ggplot() +
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), linewidth=1, color = 'black') +
+  geom_point(data=salary, aes(x=X, y=Y), shape=1, size=3, color = 'black') +
+  coord_cartesian(ylim = c(32, 67)) +
+  scale_y_continuous(breaks=seq(40, 60, 10)) +
+  labs(y='Y') +
+  ggtitle('Bayesian Confidence Intervals')
+
+p
+```
+
+Bayesian prediction intervals from posterior.
+
+```{r bayes_pred_interval_post}
+
+qua <- apply(yp_ms, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X=Xp, t(qua), check.names = FALSE)
+
+p <- ggplot() +
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), color = 'black', linewidth=1) +
+  geom_point(data=salary, aes(x=X, y=Y), color = 'black', shape=1, size=3) +
+  coord_cartesian(ylim = c(32, 67)) +
+  scale_y_continuous(breaks=seq(40, 60, 10)) +
+  labs(y='Y') +
+  ggtitle('Bayesian prediction intervals')
+
+p
+```
+
+#### Handling the posterior using transformed parameters and generated quantities
+
+Using transformed parameters and generated quantities instead of the posterior object.
+
+-   Easier to use when calculations using the posterior become complicated
+
+-   Can speed up calculations
+
+```{r stan_generated_quant}
+
+# Define xp and np
+Xp <- seq(0, 28, by = 1)
+Np <- length(Xp)
+
+# data as a list
+d = list(N = nrow(salary), X = salary$X , Y = salary$Y, Xp = Xp, Np = Np)
+
+# load model
+model.4b = cmdstan_model(
+  stan_file = './stan/model4-b.stan'
+  )
+
+# fit model to data
+fit.4b = model.4b$sample(data = d, seed = 123)
+
+```
+
+Now we can draw posterior samples from the generated quantities block and make plot of median, 50% credible interval and 95% credible interval.
+
+```{r posterior_draws_from_quant_blokc}
+# get posterior draws
+# default is a 3-D draws_array object from the posterior package
+# iterations x chains x variables
+yp_base_ms <- fit.4b$draws('yp_base', format='matrix')
+yp_ms      <- fit.4b$draws('yp', format='matrix')
+
+
+qua <- apply(yp_base_ms, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X=Xp, t(qua), check.names = FALSE)
+
+p <- ggplot() +  
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), size=1, color = 'black') +
+  geom_point(data=salary, aes(x=X, y=Y), shape=1, size=3, color = 'black') +
+  coord_cartesian(ylim = c(32, 67)) +
+  scale_y_continuous(breaks=seq(40, 60, 10)) +
+  labs(y='Y') +
+  ggtitle('Bayesian confidence intervals from generated quantities')
+
+p
+```
+
+Prediction interval plot from the generated quantities posterior.
+
+```{r pred_interval_quant_block}
+
+qua <- apply(yp_ms, 2, quantile, probs=c(0.025, 0.25, 0.50, 0.75, 0.975))
+d_est <- data.frame(X=Xp, t(qua), check.names = FALSE)
+
+
+p <- ggplot() +  
+  theme_bw(base_size=18) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`2.5%`, ymax=`97.5%`), fill='black', alpha=1/6) +
+  geom_ribbon(data=d_est, aes(x=X, ymin=`25%`, ymax=`75%`), fill='black', alpha=2/6) +
+  geom_line(data=d_est, aes(x=X, y=`50%`), size=1, color = 'black') +
+  geom_point(data=salary, aes(x=X, y=Y), shape=1, size=3, color = 'black') +
+  coord_cartesian(ylim = c(32, 67)) +
+  scale_y_continuous(breaks=seq(40, 60, 10)) +
+  labs(y='Y') +
+  ggtitle('Bayesian prediction intervals from generated quantities')
+
+p
+```
+
+## Supplement
+
+### T-test
+
+Two-sample t-test in STAN. Start with simulating data.
+
+```{r simulated_t_test_dat}
+set.seed(123)
+N1 = 30
+N2 = 20
+Y1 = rnorm(n = N1, mean = 0, sd = 5)
+Y2 = rnorm(n = N2, mean = 1, sd = 4)
+
+```
+
+1.  Visualizing distributions of Y1 and Y2, looks like there isn't much difference in distributions.
+
+```{r hist_ttest}
+# vis
+ggplot() +
+  geom_density(mapping = aes(Y1), fill = 'blue', alpha = 0.5) +
+  geom_density(mapping = aes(Y2), fill = 'red', alpha = 0.5) +
+  theme_bw()
+```
+
+2.  Two-sample test using Student's T.
+
+$$
+t = \frac{\bar{x}_1 - \bar{x}_2}{s_p \sqrt{\frac{1}{n_1} + \frac{1}{n_2}}}
+$$
+
+```{r students_t}
+t.test(Y1, Y2, var.equal = TRUE)
+```
+
+3.  STAN model for two sample t-test.
+
+```{r stan_t}
+
+# data as a list
+t_test_data = list(N1 = N1, Y1 = Y1 , N2 = N2, Y2 = Y2)
+
+
+# load model
+model.t = cmdstan_model(
+  stan_file = './stan/t_test.stan'
+  )
+
+
+# fit model
+fit.t = model.t$sample(data = t_test_data, seed = 123)
+
+fit.t$summary()
+```
+
+Check trace of model. Looks fine.
+
+```{r t_trace}
+
+mcmc_trace(fit.t$draws())
+```
+
+Extract draws.
+
+```{r extract_t_draws}
+# extact posterior draws for mu1
+mu_post = fit.t$draws(c('mu1', 'mu2'), format = 'matrix')
+
+# plot of distributions
+ggplot(data = data.frame(mu_post)) +
+  geom_histogram(aes(x = mu1), fill = 'blue', alpha = 0.5) +
+  geom_histogram(aes(x = mu2), fill = 'red', alpha = 0.5) +
+  theme_bw() +
+  labs(x = 'mu', y = 'count') +
+  ggtitle('Distribution of mu1 of Y1 and mu2 of Y2') 
+
+```
+
+4.  Computing probability of $Pr[\mu_1 < \mu_2]$ using posterior draws. Looks like $Pr[\mu_1 < \mu_2]$ \~ 0.92.
+
+```{r computed_prob_mu1_mu2}
+mean( mu_post[, 'mu1'] < mu_post[, 'mu2'] ) 
+```
+
+Calculating equivalent of p-value $Pr[(\mu_1 - \mu_2) < 0]$ another way.
+
+```{r bayes_pval}
+# can take the mean of true/false too since it's the same as above.
+mean( (mu_post[, 'mu1'] - mu_post[, 'mu2']) < 0 ) 
+```
+
+```{r plot_of_change}
+ggplot(data = tibble(delta = mu_post[, 'mu1'] - mu_post[, 'mu2'])) +
+  geom_histogram(aes(x = delta), fill = 'blue', alpha = 0.5) +
+  geom_vline(xintercept = 0, color = 'red', linetype = 'dashed') +
+  theme_bw() +
+  labs(x = 'mu', y = 'count') +
+  ggtitle('Distribution of mu1 - mu2') 
+```
+
+5.  Now do all the above sets but for unequal SDs.
+
+```{r welchs_t}
+# welch / saither
+t.test(Y1, Y2, var.equal = FALSE)
+
+```
+
+STAN Welch's T.
+
+```{r stan_welches_t}
+
+# load model
+model.tw = cmdstan_model(
+  stan_file = './stan/welch_t_test.stan'
+  )
+
+
+# fit model
+fit.tw = model.tw$sample(data = t_test_data, seed = 123)
+
+fit.tw$summary()
+```
+
+```{r extract_welch_t_draws}
+# extact posterior draws for mu1
+mu_post_welch = fit.tw$draws(c('mu1', 'mu2'), format = 'matrix')
+
+# plot of distributions
+ggplot(data = data.frame(mu_post_welch)) +
+  geom_histogram(aes(x = mu1), fill = 'blue', alpha = 0.5) +
+  geom_histogram(aes(x = mu2), fill = 'red', alpha = 0.5) +
+  theme_bw() +
+  labs(x = 'mu', y = 'count') +
+  ggtitle('Distribution of mu1 of Y1 and mu2 of Y2') 
+```
+
+Calculating $Pr[\mu_1 < \mu_2]$
+
+```{r mu_post_welch}
+mean( mu_post_welch[, 'mu1'] < mu_post_welch[, 'mu2'] ) 
 ```
 
 ### Example of maximum likelihood estimation

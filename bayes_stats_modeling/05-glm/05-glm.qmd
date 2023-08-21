@@ -1,0 +1,141 @@
+---
+title: "Chapter 5 GLM"
+Author: "Ryan Gan""
+Date: "`r Sys.Date()`"
+format:
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+editor: visual
+---
+
+```{r setup, messages=FALSE, warnings=FALSE}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+# Libraries
+library(tidyverse)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)
+library(GGally)
+color_scheme_set('purple')
+
+
+# Define the Night Owl theme
+night_owl_theme <- theme(
+  # Overall plot appearance
+  plot.background = element_rect(fill = "#011627"),  # Dark blue background
+  plot.title = element_text(color = "#FFD166", size = 18, hjust = 0.5),  # Light yellow title
+  plot.subtitle = element_text(color = "#FFD166", size = 14, hjust = 0.5),  # Light yellow subtitle
+
+  # Axis appearance
+  axis.line = element_line(color = "white"),  # White axis lines
+  axis.text = element_text(color = "white"),  # White axis text
+  axis.title = element_text(color = "white"),  # White axis titles
+  axis.ticks = element_line(color = "white"),  # White axis tick marks
+
+  # Panel appearance
+  panel.background = element_rect(fill = "#011627"),  # Dark blue panel background
+  panel.grid.major = element_line(color = "#303B50"),  # Gray grid lines
+  panel.grid.minor = element_line(color = "#192138"),  # Dark gray grid lines
+
+  # Legend appearance
+  legend.background = element_rect(fill = "#011627"),  # Dark blue legend background
+  legend.title = element_text(color = "white"),  # White legend title
+  legend.text = element_text(color = "white"),  # White legend text
+
+  # Facet appearance
+  strip.background = element_rect(fill = "#011627"),  # Dark blue facet strip background
+  strip.text = element_text(color = "white")  # White facet strip text
+)
+
+
+```
+
+## Purpose
+
+Working through chapter 5: basic regressions and model checking.
+
+### 5.1 Multiple Linear Regression
+
+```{r read_data5.1}
+
+data_5.1 <- read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-1.csv')
+
+head(data_5.1)
+```
+
+Pairs plot of variable relationships.
+
+```{r pairs_plot}
+
+ggpairs(data_5.1) +
+  night_owl_theme
+```
+
+Formula for Y purchase proportion based on sex and income. Model we will focus on is 5.3, defining parameter \$\mu\$ with a linear model.
+
+$$
+\mu[n] = \alpha + \beta_1*Sex[n] + \beta_2 * Income[n] + \epsilon[n] \\
+Y[n] \backsim N(\mu[n], \sigma) 
+$$
+
+Will also include a simulation to see if we can recover parameters.
+
+```{r stan_model_5.3}
+
+# Divide income by 100
+data_5.1$Income <- data_5.1$Income/100
+# data as a list
+d = as.list(data_5.1)
+# add number of obs
+d$N <- nrow(data_5.1)
+
+# Y sim mean
+Y_sim_mean <- 0.2 + 0.15*data_5.1$Sex + 0.4*data_5.1$Income
+Y_sim <- rnorm(n = nrow(data_5.1), mean = Y_sim_mean, sd = 0.1)
+
+# data sim list
+d_sim <- list(N = nrow(data_5.1), Sex = data_5.1$Sex , Income = data_5.1$Income, 
+              Y = Y_sim)
+
+# load model
+model.5.3 = cmdstan_model(
+  stan_file = './bayes_stats_modeling/05-glm/stan/model5-3.stan'
+  )
+
+# fit model to sim data
+fit.5.3.sim = model.5.3$sample(data = d_sim, seed = 123, parallel_chains = 4)
+# fit model to observed data
+fit.5.3 = model.5.3$sample(data = d, seed = 123, parallel_chains = 4)
+
+```
+
+Summary of beta and sigma for simulation for simulation.
+
+```{r mod5.3_sim_summary}
+fit.5.3.sim$summary(c('b','sigma'))
+```
+
+....for observed
+
+```{r mod5.3}
+fit.5.3$summary(c('b','sigma'))
+```
+
+```{r mod5.3_trace}
+mcmc_trace(fit.5.3$draws(), regex_pars = c('b', 'sigma'))
+```
+
+```{r mod5.3_hist}
+
+mcmc_hist(fit.5.3$draws(), regex_pars = c('b', 'sigma'))
+
+```
+
+```{r}
+# get posterior draws
+# default is a 3-D draws_array object from the posterior package
+# iterations x chains x variables
+draws_arr <- fit.5.3$draws() # or format="array"
+```
