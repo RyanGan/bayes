@@ -18,6 +18,7 @@ library(cmdstanr)
 library(posterior)
 library(bayesplot)
 library(GGally)
+library(pROC)
 color_scheme_set('purple')
 
 
@@ -78,7 +79,7 @@ Formula for Y purchase proportion based on sex and income. Model we will focus o
 $$
 \mu[n] = \alpha + \beta_1*Sex[n] + \beta_2 * Income[n] + \epsilon[n] \\
 Y[n] \backsim N(\mu[n], \sigma) 
-$$
+$$ {#eq-5.1 - multivariable}
 
 Will also include a simulation to see if we can recover parameters.
 
@@ -123,9 +124,13 @@ fit.5.3.sim$summary(c('b','sigma'))
 fit.5.3$summary(c('b','sigma'))
 ```
 
+Trace looks good. Also Rhat all \~1.0 so that's good too.
+
 ```{r mod5.3_trace}
 mcmc_trace(fit.5.3$draws(), regex_pars = c('b', 'sigma'))
 ```
+
+Check distributions.
 
 ```{r mod5.3_hist}
 
@@ -133,9 +138,268 @@ mcmc_hist(fit.5.3$draws(), regex_pars = c('b', 'sigma'))
 
 ```
 
-```{r}
+Posterior predictive checks are used to overlay posterior predictive distribution and data distribution.
+
+Plot of observed values vs predicted.
+
+```{r posterior_predictive_check}
 # get posterior draws
 # default is a 3-D draws_array object from the posterior package
 # iterations x chains x variables
-draws_arr <- fit.5.3$draws() # or format="array"
+yp_ms <- fit.5.3$draws('yp', format = 'matrix') # or format="array"
+
+# column-wise to get quantiles
+qua <- apply(yp_ms, 2, quantile, prob=c(0.1, 0.5, 0.9))
+d_est <- data.frame(d, t(qua), check.names=FALSE) %>% 
+  mutate(Sex = as.factor(Sex))
+
+# plot of quantiles
+ggplot(
+  data=d_est, aes(x=Y, y=`50%`, ymin=`10%`, ymax=`90%`, shape=Sex, fill=Sex)
+  ) +
+  theme_bw(base_size=18) +
+  theme(legend.key.height=grid::unit(2.5,'line')) +
+  coord_fixed(ratio=1, xlim=c(0.28, .8), ylim=c(0.28, .8)) +
+  geom_pointrange(size=0.8, color='gray5') +
+  geom_abline(aes(slope=1, intercept=0), 
+              color='black', alpha=3/5, linetype='31') +
+  scale_shape_manual(values=c(21, 24)) +
+  scale_fill_manual(values=c('white', 'gray70')) +
+  labs(x='Observed', y='Predicted') +
+  scale_x_continuous(breaks=seq(from=0, to=1, by=0.1)) +
+  scale_y_continuous(breaks=seq(from=0, to=1, by=0.1))
 ```
+
+Posterior residual checks (PRC)
+
+```{r prc}
+mu_ms <- fit.5.3$draws('mu', format='matrix')
+N_ms <- nrow(mu_ms)
+noise_ms <- t(replicate(N_ms, data_5.1$Y)) - mu_ms
+# noise_ms <- einsum::einsum('n,m->mn', d$Y, rep(1, N_ms)) - mu_ms
+
+d_est <- data.frame(noise_ms, check.names=FALSE) %>% 
+  tidyr::pivot_longer(cols=everything(), names_to='Parameter') %>% 
+  mutate(PersonID = readr::parse_number(Parameter))
+
+d_mode <- apply(noise_ms, 2, function(x) {
+  dens <- density(x)
+  mode_i <- which.max(dens$y)
+  mode_x <- dens$x[mode_i]
+  mode_y <- dens$y[mode_i]
+  c(mode_x, mode_y)
+}) %>% 
+  t() %>% 
+  data.frame() %>% 
+  magrittr::set_colnames(c('X', 'Y'))
+
+p <- ggplot() +
+  theme_bw(base_size=18) +
+  geom_line(data=d_est, aes(x=value, group=PersonID), stat='density', color='black', alpha=0.4) +
+  geom_segment(data=d_mode, aes(x=X, xend=X, y=Y, yend=0), color='black', linetype='dashed', alpha=0.4) +
+  geom_rug(data=d_mode, aes(x=X), sides='b') +
+  labs(x='value', y='density')
+
+p
+```
+
+In [Bayesian statistics](https://en.wikipedia.org/wiki/Bayesian_statistics "Bayesian statistics"), a **maximum a posteriori probability** (**MAP**) **estimate** is an estimate of an unknown quantity, that equals the [mode](https://en.wikipedia.org/wiki/Mode_(statistics) "Mode (statistics)") of the [posterior distribution](https://en.wikipedia.org/wiki/Posterior_distribution "Posterior distribution"). The MAP can be used to obtain a [point estimate](https://en.wikipedia.org/wiki/Point_estimation "Point estimation") of an unobserved quantity on the basis of empirical data. It is closely related to the method of [maximum likelihood](https://en.wikipedia.org/wiki/Maximum_likelihood "Maximum likelihood") (ML) estimation, but employs an augmented [optimization objective](https://en.wikipedia.org/wiki/Optimization_(mathematics) "Optimization (mathematics)") which incorporates a [prior distribution](https://en.wikipedia.org/wiki/Prior_distribution "Prior distribution") (that quantifies the additional information available through prior knowledge of a related event) over the quantity one wants to estimate. MAP estimation can therefore be seen as a [regularization](https://en.wikipedia.org/wiki/Regularization_(mathematics) "Regularization (mathematics)") of maximum likelihood estimation.
+
+```{r map_plot}
+
+s_dens <- density(fit.5.3$draws('sigma', format='matrix'))
+s_MAP <- s_dens$x[which.max(s_dens$y)]
+bw <- 0.01
+
+p <- ggplot(data=d_mode, aes(x=X)) +
+  theme_bw(base_size=18) +
+  geom_histogram(
+    aes(y=after_stat(density)), binwidth=bw, color='black', fill='white'
+    ) +
+  geom_density(color=NA, fill='gray20', alpha=0.5) +
+  geom_rug(sides='b') +
+  stat_function(fun=function(x) dnorm(x, mean=0, sd=s_MAP), linetype='dashed', 
+                color = 'black') +
+  labs(x='value', y='density') +
+  xlim(range(density(d_mode$X)$x))
+
+p
+```
+
+### 5.3 Binomial Logistic Regression
+
+Similar data but instead of the proportion already calculated as Y, we are given Y count of purchases and M visits to website. Income and sex are the same predictors.
+
+```{r data_5.3}
+
+data_5.3 <- 
+  read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-2.csv') %>% 
+  mutate(Income = Income / 100) # scaled income like we did above
+
+head(data_5.3)
+```
+
+```{r pairs_plot_5.3}
+
+data_5.3 %>% 
+  mutate(proportion = Y / M) %>% 
+  select(-PersonID) %>% 
+  ggpairs() +
+  night_owl_theme
+
+```
+
+*Formula 5.4*
+
+Model formula for logistic model.
+
+$$
+q[n] = logit^{-1}(b_1 + b_2Sex[n] + b_3Income[n]) \\
+Y[n] \backsim binomial(M[n], q[n])
+$$ {#eq-5.4 - binomial logistic}
+
+```{r stan_model_5.4}
+
+# salary 2 data as a list
+d2 <- as.list(data_5.3)
+# number of rows
+d2$N <- nrow(data_5.3)
+
+# load model
+model.5.4 = cmdstan_model(
+  stan_file = './bayes_stats_modeling/05-glm/stan/model5-4.stan'
+  )
+
+# fit model to observed data
+fit.5.4 = model.5.4$sample(data = d2, seed = 123, parallel_chains = 4)
+
+# model summary
+fit.5.4$summary(variables = c('b'))
+```
+
+Posterior distributions of betas.
+
+```{r 5.4 histogram}
+mcmc_hist(fit.5.4$draws(), regex_pars = c('b'))
+```
+
+Extracting posterior draws to answer question of odds of purchasing for customer with income \$90k vs \$40k.
+
+```{r draws.5.4}
+
+draws.5.4 <- fit.5.4$draws(format = 'matrix')
+# estimated means
+exp(mean(draws.5.4[,4]*(90/100))) / exp(mean(draws.5.4[,4]*(40/100)))
+```
+
+Skipping model checking etc.
+
+### 5.4 Logistic Regression
+
+Modification of the problem where instead of overall visits and counts of purchases per customer, we are interested in how discount influences a single purchase (binary 1 or 0).
+
+```{r read_data_4}
+
+data_5.4 <- read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-3.csv')
+
+head(data_5.4)
+```
+
+Checking distribution of discount by purchase.
+
+```{r discount_purchase_distribution}
+
+knitr::kable( 
+  prop.table(with( data_5.4, table(Discount, Y) ), 2 ) ,
+  caption = 'Contigency table of discount by purchase (Y)'
+  )
+```
+
+Bernoulli logistic model formula.
+
+$$
+
+q[v] = logit^{-1}(b_1 + b_2Sex[v] + b_3Income[v] + b_4Discount[v]) \\
+Y[v] \backsim Bernoulli(q[v])
+
+$$
+
+```{r stan_model 5.4b}
+
+# salary 2 data as a list
+d3 <- as.list(data_5.4)
+# number of rows
+d3$V <- nrow(data_5.4)
+
+# load model
+model.5.5 = cmdstan_model(
+  stan_file = './bayes_stats_modeling/05-glm/stan/model5-5.stan'
+  )
+
+# fit model to observed data
+fit.5.5 = model.5.5$sample(data = d3, seed = 123, parallel_chains = 4)
+```
+
+Summary of model 5.5 (replacing b\[i\] with variable names).
+
+```{r model5.5_summary}
+# model summary
+summary_5.5 <- fit.5.5$summary(variables = c('b'))
+summary_5.5$variable <- c('Intercept', 'Sex', 'Income', 'Discount') 
+
+summary_5.5
+```
+
+ROC, with threshold set at 0.6 for predicted probability.
+
+Note, how would you get the AUC? Something for another date.
+
+```{r roc_plot}
+q_ms <- fit.5.5$draws('q', format='matrix')
+N_ms <- nrow(q_ms)
+spec <- seq(from=0, to=1, len=201)
+probs <- c(0.1, 0.5, 0.9)
+
+auces <- numeric(N_ms)
+m_roc <- matrix(nrow=N_ms, ncol=length(spec))
+
+for (i in 1:N_ms) {
+  roc_res <- roc(d3$Y, q_ms[i,], quiet=TRUE)
+  auces[i] <- as.numeric(roc_res$auc)
+  m_roc[i,] <- coords(roc_res, x=spec, input='specificity', ret='sensitivity') %>% unlist()
+}
+
+# quantile(auces, prob=probs)
+qua <- apply(m_roc, 2, quantile, prob=probs)
+d_est <- data.frame(X=1-spec, t(qua), check.names=FALSE)
+
+p <- ggplot(data=d_est, aes(x=X, y=`50%`)) +
+  theme_bw(base_size=18) +
+  theme(legend.position='none') + 
+  coord_fixed(ratio=1, xlim=c(0,1), ylim=c(0,1)) +
+  geom_abline(intercept=0, slope=1, alpha=0.5) +
+  geom_ribbon(aes(ymin=`10%`, ymax=`90%`), fill='grey', alpha=2/6) +
+  geom_line(size=1) +
+  labs(x='False Positive', y='True Positive') +
+  night_owl_theme
+
+p
+```
+
+Quick attempt at a calibration plot of the median predicted q (may not be right).
+
+```{r cal_plot}
+qua_q <- apply(q_ms, 2, quantile, probs)
+
+plot_data <- data.frame(d3, t(qua_q), check.names=FALSE) 
+
+ggplot() +
+  geom_point() +
+  geom_smooth(data = plot_data, aes(x=`50%`, y = Y), method = 'loess', se = FALSE) +
+  geom_abline(intercept = 0, slope = 1, color = "purple", linetype = "dashed") +
+  labs(x = "Predicted Probability", y = "Observed Proportion of Positive Outcomes",
+       title = "Calibration Plot") +
+  coord_cartesian(ylim = c(0,1)) +
+  night_owl_theme
+```
+
