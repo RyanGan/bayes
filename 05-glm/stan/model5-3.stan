@@ -1,6 +1,5 @@
-//
 // Model 5-3 
-//
+
 
 data {
   int N;                                // Number of observations
@@ -28,4 +27,5 @@ model {
 
 generated quantities {
   array[N] real yp = normal_rng(mu[1:N], sigma);
+  vector[N] epsilon = Y - mu;  // Residuals
 }

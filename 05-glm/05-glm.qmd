@@ -8,6 +8,8 @@ format:
     code-fold: true
     code-summary: "Show the code"
 editor: visual
+project:
+  execute-dir: project
 ---
 
 ```{r setup, messages=FALSE, warnings=FALSE}
@@ -51,7 +53,6 @@ night_owl_theme <- theme(
   strip.text = element_text(color = "white")  # White facet strip text
 )
 
-
 ```
 
 ## Purpose
@@ -62,7 +63,7 @@ Working through chapter 5: basic regressions and model checking.
 
 ```{r read_data5.1}
 
-data_5.1 <- read.csv('./data/data-shopping-1.csv')
+data_5.1 <- read.csv('./05-glm/data/data-shopping-1.csv')
 
 head(data_5.1)
 ```
@@ -71,8 +72,7 @@ Pairs plot of variable relationships.
 
 ```{r pairs_plot}
 
-ggpairs(data_5.1) +
-  night_owl_theme
+ggpairs(data_5.1) 
 ```
 
 Formula for Y purchase proportion based on sex and income. Model we will focus on is 5.3, defining parameter \$\mu\$ with a linear model.
@@ -98,12 +98,12 @@ Y_sim_mean <- 0.2 + 0.15*data_5.1$Sex + 0.4*data_5.1$Income
 Y_sim <- rnorm(n = nrow(data_5.1), mean = Y_sim_mean, sd = 0.1)
 
 # data sim list
-d_sim <- list(N = nrow(data_5.1), Sex = data_5.1$Sex , Income = data_5.1$Income, 
-              Y = Y_sim)
+d_sim <- list(N = nrow(data_5.1), Sex = data_5.1$Sex, 
+              Income = data_5.1$Income, Y = Y_sim)
 
 # load model
 model.5.3 = cmdstan_model(
-  stan_file = './stan/model5-3.stan'
+  stan_file = './05-glm/stan/model5-3.stan'
   )
 
 # fit model to sim data
@@ -234,7 +234,7 @@ Similar data but instead of the proportion already calculated as Y, we are given
 ```{r data_5.3}
 
 data_5.3 <- 
-  read.csv('./data/data-shopping-2.csv') |> 
+  read.csv('./05-glm/data/data-shopping-2.csv') |> 
   mutate(Income = Income / 100) # scaled income like we did above
 
 head(data_5.3)
@@ -245,8 +245,7 @@ head(data_5.3)
 data_5.3 |> 
   mutate(proportion = Y / M) |> 
   select(-PersonID) |> 
-  ggpairs() +
-  night_owl_theme
+  ggpairs() 
 
 ```
 
@@ -268,7 +267,7 @@ d2$N <- nrow(data_5.3)
 
 # load model
 model.5.4 = cmdstan_model(
-  stan_file = './stan/model5-4.stan'
+  stan_file = './05-glm/stan/model5-4.stan'
   )
 
 # fit model to observed data
@@ -302,7 +301,7 @@ Modification of the problem where instead of overall visits and counts of purcha
 ```{r read_data_4}
 
 data_5.4 <- read.csv(
-  "./data/data-shopping-3.csv"
+  './05-glm/data/data-shopping-3.csv'
   ) |> 
   mutate(Income = Income / 100)
 
@@ -335,7 +334,7 @@ d3$V <- nrow(data_5.4)
 
 # load model
 model.5.5 = cmdstan_model(
-  stan_file = './stan/model5-5.stan'
+  stan_file = './05-glm/stan/model5-5.stan'
   )
 
 # fit model to observed data
@@ -420,7 +419,7 @@ Using data-shopping-2 file used above. List object is called d2.
 ```{r model5.6}
 
 model.5.6 = cmdstan_model(
-  stan_file = './stan/model5-6.stan'
+  stan_file = './05-glm/stan/model5-6.stan'
   )
 
 # fit model to observed data
@@ -452,7 +451,7 @@ Instead of specifying each parameter, we can use a predictor matrix instead.
 
 ```{r read_shopping_data_4}
 shopping_4 <- 
-  read.csv('./data/data-shopping-4.csv') |> 
+  read.csv('./05-glm/data/data-shopping-4.csv') |> 
   mutate(Income = Income / 100)
 
 head(shopping_4)
@@ -475,7 +474,7 @@ d4 <- list(
 )
 
 model.5.7 = cmdstan_model(
-  stan_file = './stan/model5-7.stan'
+  stan_file = './05-glm/stan/model5-7.stan'
   )
 
 # fit model to observed data
@@ -498,8 +497,31 @@ summary_5.7
 
 ```{r q1}
 
-# get the draws for 5.3
-draws5.3 <- fit.5.3$draws('yp', format = 'matrix')
+# get the mean values from the fit summary and multiply by the predictor matrix
+mu <- rowSums(as.matrix(data_5.1[, 1:3]) * fit.5.3$summary('b')$mean)
+
+epsilon <- data_5.1$Y - mu
+
+head(epsilon)
 ```
 
-1.  
+2.  Modify model 5.3 to generate $\epsilon[n]$ in generated quantities block.
+
+```{r model5.3_epsilon}
+# load model
+model.5.3 = cmdstan_model(
+  stan_file = './05-glm/stan/model5-3.stan'
+  )
+
+# fit model to observed data
+fit.5.3.epsilon = model.5.3$sample(data = d, seed = 123, parallel_chains = 4)
+
+epsilon_gq <- apply(fit.5.3.epsilon$draws('epsilon', format='matrix'), 2, mean)
+
+head(epsilon_gq)
+
+cbind(epsilon, epsilon_gq)
+
+```
+
+3\.
