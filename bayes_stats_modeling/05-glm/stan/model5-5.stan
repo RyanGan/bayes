@@ -4,7 +4,7 @@ data {
   vector <lower=0, upper=1> [V] Sex;      // Sex predictor bounded between 0 and 1
   vector <lower=0> [V] Income;            // Income predictor bounded by 0
   vector <lower=0, upper=1> [V] Discount;  // Discount variable
-  array[V] int<lower=0, upper=1> Y;        // Binomial (0/1) purchase
+  array[V] int<lower=0, upper=1> Y;        // Binom (0/1) purchase
 }
 
 parameters {

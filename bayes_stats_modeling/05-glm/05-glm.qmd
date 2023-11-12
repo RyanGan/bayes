@@ -1,9 +1,10 @@
 ---
 title: "Chapter 5 GLM"
-Author: "Ryan Gan""
+Author: "Ryan Gan"
 Date: "`r Sys.Date()`"
 format:
   html:
+    self-contained: true
     code-fold: true
     code-summary: "Show the code"
 editor: visual
@@ -61,7 +62,7 @@ Working through chapter 5: basic regressions and model checking.
 
 ```{r read_data5.1}
 
-data_5.1 <- read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-1.csv')
+data_5.1 <- read.csv('./data/data-shopping-1.csv')
 
 head(data_5.1)
 ```
@@ -102,7 +103,7 @@ d_sim <- list(N = nrow(data_5.1), Sex = data_5.1$Sex , Income = data_5.1$Income,
 
 # load model
 model.5.3 = cmdstan_model(
-  stan_file = './bayes_stats_modeling/05-glm/stan/model5-3.stan'
+  stan_file = './stan/model5-3.stan'
   )
 
 # fit model to sim data
@@ -150,7 +151,7 @@ yp_ms <- fit.5.3$draws('yp', format = 'matrix') # or format="array"
 
 # column-wise to get quantiles
 qua <- apply(yp_ms, 2, quantile, prob=c(0.1, 0.5, 0.9))
-d_est <- data.frame(d, t(qua), check.names=FALSE) %>% 
+d_est <- data.frame(d, t(qua), check.names=FALSE) |> 
   mutate(Sex = as.factor(Sex))
 
 # plot of quantiles
@@ -178,8 +179,8 @@ N_ms <- nrow(mu_ms)
 noise_ms <- t(replicate(N_ms, data_5.1$Y)) - mu_ms
 # noise_ms <- einsum::einsum('n,m->mn', d$Y, rep(1, N_ms)) - mu_ms
 
-d_est <- data.frame(noise_ms, check.names=FALSE) %>% 
-  tidyr::pivot_longer(cols=everything(), names_to='Parameter') %>% 
+d_est <- data.frame(noise_ms, check.names=FALSE) |> 
+  tidyr::pivot_longer(cols=everything(), names_to='Parameter') |> 
   mutate(PersonID = readr::parse_number(Parameter))
 
 d_mode <- apply(noise_ms, 2, function(x) {
@@ -188,9 +189,9 @@ d_mode <- apply(noise_ms, 2, function(x) {
   mode_x <- dens$x[mode_i]
   mode_y <- dens$y[mode_i]
   c(mode_x, mode_y)
-}) %>% 
-  t() %>% 
-  data.frame() %>% 
+}) |> 
+  t() |> 
+  data.frame() |> 
   magrittr::set_colnames(c('X', 'Y'))
 
 p <- ggplot() +
@@ -233,7 +234,7 @@ Similar data but instead of the proportion already calculated as Y, we are given
 ```{r data_5.3}
 
 data_5.3 <- 
-  read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-2.csv') %>% 
+  read.csv('./data/data-shopping-2.csv') |> 
   mutate(Income = Income / 100) # scaled income like we did above
 
 head(data_5.3)
@@ -241,9 +242,9 @@ head(data_5.3)
 
 ```{r pairs_plot_5.3}
 
-data_5.3 %>% 
-  mutate(proportion = Y / M) %>% 
-  select(-PersonID) %>% 
+data_5.3 |> 
+  mutate(proportion = Y / M) |> 
+  select(-PersonID) |> 
   ggpairs() +
   night_owl_theme
 
@@ -267,7 +268,7 @@ d2$N <- nrow(data_5.3)
 
 # load model
 model.5.4 = cmdstan_model(
-  stan_file = './bayes_stats_modeling/05-glm/stan/model5-4.stan'
+  stan_file = './stan/model5-4.stan'
   )
 
 # fit model to observed data
@@ -300,9 +301,11 @@ Modification of the problem where instead of overall visits and counts of purcha
 
 ```{r read_data_4}
 
-data_5.4 <- read.csv('./bayes_stats_modeling/05-glm/data/data-shopping-3.csv')
+data_5.4 <- read.csv(
+  "./data/data-shopping-3.csv"
+  ) |> 
+  mutate(Income = Income / 100)
 
-head(data_5.4)
 ```
 
 Checking distribution of discount by purchase.
@@ -317,12 +320,11 @@ knitr::kable(
 
 Bernoulli logistic model formula.
 
-$$
+\$\$
 
-q[v] = logit^{-1}(b_1 + b_2Sex[v] + b_3Income[v] + b_4Discount[v]) \\
-Y[v] \backsim Bernoulli(q[v])
+q\[v\] = logit\^{-1}(b_1 + b_2Sex\[v\] + b_3Income\[v\] + b_4Discount\[v\]) \\ Y\[v\] \backsim Bernoulli(q\[v\])
 
-$$
+\$\$
 
 ```{r stan_model 5.4b}
 
@@ -333,7 +335,7 @@ d3$V <- nrow(data_5.4)
 
 # load model
 model.5.5 = cmdstan_model(
-  stan_file = './bayes_stats_modeling/05-glm/stan/model5-5.stan'
+  stan_file = './stan/model5-5.stan'
   )
 
 # fit model to observed data
@@ -366,7 +368,7 @@ m_roc <- matrix(nrow=N_ms, ncol=length(spec))
 for (i in 1:N_ms) {
   roc_res <- roc(d3$Y, q_ms[i,], quiet=TRUE)
   auces[i] <- as.numeric(roc_res$auc)
-  m_roc[i,] <- coords(roc_res, x=spec, input='specificity', ret='sensitivity') %>% unlist()
+  m_roc[i,] <- coords(roc_res, x=spec, input='specificity', ret='sensitivity') |> unlist()
 }
 
 # quantile(auces, prob=probs)
@@ -403,3 +405,101 @@ ggplot() +
   night_owl_theme
 ```
 
+### 5.5 Poisson Regression
+
+Poisson model formula 5.6:
+
+\$\$
+
+\lambda[n] = exp\^(b_1 + b_2Sex\[n\] + b_3Income\[n\]) \\ M\[n\] \backsim Poisson(\lambda[n])
+
+\$\$
+
+Using data-shopping-2 file used above. List object is called d2.
+
+```{r model5.6}
+
+model.5.6 = cmdstan_model(
+  stan_file = './stan/model5-6.stan'
+  )
+
+# fit model to observed data
+fit.5.6 = model.5.6$sample(data = d2, seed = 123, parallel_chains = 4)
+```
+
+Summary of model 5.6.
+
+```{r model5.6_summary}
+# model summary
+summary_5.6 <- fit.5.6$summary(variables = c('b'))
+summary_5.6$variable <- c('Intercept', 'Sex', 'Income') 
+
+summary_5.6
+```
+
+Example in book estimating income of 90 vs income of 40.
+
+```{r model5.6_example}
+
+draws.5.6 <- fit.5.6$draws('b', format='matrix')
+
+mean(exp(draws.5.6[,3] * ((90 - 40)/100)))
+```
+
+### 5.6 Expression Using Matrix Operation
+
+Instead of specifying each parameter, we can use a predictor matrix instead.
+
+```{r read_shopping_data_4}
+shopping_4 <- 
+  read.csv('./data/data-shopping-4.csv') |> 
+  mutate(Income = Income / 100)
+
+head(shopping_4)
+```
+
+Model 5.7 using a matrix.
+
+```{r model5.7}
+# Predictor matrix X
+X <- cbind(
+  data.frame(Intercept = 1), 
+  shopping_4[, 2:(ncol(shopping_4)-1)]
+  )
+
+d4 <- list(
+  N = nrow(shopping_4),
+  Y = shopping_4$Y, 
+  X = X,
+  D = ncol(X) 
+)
+
+model.5.7 = cmdstan_model(
+  stan_file = './stan/model5-7.stan'
+  )
+
+# fit model to observed data
+fit.5.7 = model.5.7$sample(data = d4, seed = 123, parallel_chains = 4)
+```
+
+Model summary of 5.7.
+
+```{r model5.7_summary}
+# model summary
+summary_5.7 <- fit.5.7$summary(variables = c('b'))
+summary_5.7$variable <- names(X)
+
+summary_5.7
+```
+
+### 5.7.1 Exercises
+
+1.  Use MCMC samples from model5.3 to compute the MCMC sample of $\epsilon[n] = Y[n] - \mu[n]$ for each n (i.e. residuals).
+
+```{r q1}
+
+# get the draws for 5.3
+draws5.3 <- fit.5.3$draws('yp', format = 'matrix')
+```
+
+1.  

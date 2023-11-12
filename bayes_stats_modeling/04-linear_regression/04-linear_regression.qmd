@@ -1,9 +1,10 @@
 ---
-Title: "Chapter 4 Linear Regression""
-Author: "Ryan Gan""
-Date: "2023-07-01""
+Title: "Chapter 4 Linear Regression"
+Author: "Ryan Gan"
+Date: "2023-07-01"
 format:
   html:
+    self-contained: true
     code-fold: true
     code-summary: "Show the code"
 editor: visual
