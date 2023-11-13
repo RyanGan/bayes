@@ -27,5 +27,8 @@ model {
 
 generated quantities {
   array[N] real yp = normal_rng(mu[1:N], sigma);
-  vector[N] epsilon = Y - mu;  // Residuals
+  // epsilon 
+  vector[N] yp_vector = to_vector(yp);            // Convert yp to a vector
+  vector[N] Y_unconstrained = to_vector(Y);       // Convert Y to an unconstrained vector
+  vector[N] epsilon = Y_unconstrained - yp_vector; // Calculate epsilon
 }

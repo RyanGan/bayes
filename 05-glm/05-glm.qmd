@@ -1,20 +1,18 @@
 ---
 title: "Chapter 5 GLM"
-Author: "Ryan Gan"
-Date: "`r Sys.Date()`"
+author: "Ryan Gan"
+date: "`r Sys.Date()`"
 format:
   html:
     self-contained: true
     code-fold: true
     code-summary: "Show the code"
 editor: visual
-project:
-  execute-dir: project
 ---
 
-```{r setup, messages=FALSE, warnings=FALSE}
+```{r setup, messages=FALSE, warnings=FALSE, echo=FALSE}
 
-knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo=FALSE) 
 # Libraries
 library(tidyverse)
 library(cmdstanr)
@@ -63,7 +61,7 @@ Working through chapter 5: basic regressions and model checking.
 
 ```{r read_data5.1}
 
-data_5.1 <- read.csv('./05-glm/data/data-shopping-1.csv')
+data_5.1 <- read.csv('./data/data-shopping-1.csv')
 
 head(data_5.1)
 ```
@@ -80,7 +78,7 @@ Formula for Y purchase proportion based on sex and income. Model we will focus o
 $$
 \mu[n] = \alpha + \beta_1*Sex[n] + \beta_2 * Income[n] + \epsilon[n] \\
 Y[n] \backsim N(\mu[n], \sigma) 
-$$ {#eq-5.1 - multivariable}
+$$
 
 Will also include a simulation to see if we can recover parameters.
 
@@ -103,7 +101,7 @@ d_sim <- list(N = nrow(data_5.1), Sex = data_5.1$Sex,
 
 # load model
 model.5.3 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-3.stan'
+  stan_file = './stan/model5-3.stan'
   )
 
 # fit model to sim data
@@ -234,7 +232,7 @@ Similar data but instead of the proportion already calculated as Y, we are given
 ```{r data_5.3}
 
 data_5.3 <- 
-  read.csv('./05-glm/data/data-shopping-2.csv') |> 
+  read.csv('./data/data-shopping-2.csv') |> 
   mutate(Income = Income / 100) # scaled income like we did above
 
 head(data_5.3)
@@ -267,7 +265,7 @@ d2$N <- nrow(data_5.3)
 
 # load model
 model.5.4 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-4.stan'
+  stan_file = './stan/model5-4.stan'
   )
 
 # fit model to observed data
@@ -301,7 +299,7 @@ Modification of the problem where instead of overall visits and counts of purcha
 ```{r read_data_4}
 
 data_5.4 <- read.csv(
-  './05-glm/data/data-shopping-3.csv'
+  './data/data-shopping-3.csv'
   ) |> 
   mutate(Income = Income / 100)
 
@@ -334,7 +332,7 @@ d3$V <- nrow(data_5.4)
 
 # load model
 model.5.5 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-5.stan'
+  stan_file = './stan/model5-5.stan'
   )
 
 # fit model to observed data
@@ -419,7 +417,7 @@ Using data-shopping-2 file used above. List object is called d2.
 ```{r model5.6}
 
 model.5.6 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-6.stan'
+  stan_file = './stan/model5-6.stan'
   )
 
 # fit model to observed data
@@ -451,7 +449,7 @@ Instead of specifying each parameter, we can use a predictor matrix instead.
 
 ```{r read_shopping_data_4}
 shopping_4 <- 
-  read.csv('./05-glm/data/data-shopping-4.csv') |> 
+  read.csv('./data/data-shopping-4.csv') |> 
   mutate(Income = Income / 100)
 
 head(shopping_4)
@@ -474,7 +472,7 @@ d4 <- list(
 )
 
 model.5.7 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-7.stan'
+  stan_file = './stan/model5-7.stan'
   )
 
 # fit model to observed data
@@ -493,35 +491,48 @@ summary_5.7
 
 ### 5.7.1 Exercises
 
-1.  Use MCMC samples from model5.3 to compute the MCMC sample of $\epsilon[n] = Y[n] - \mu[n]$ for each n (i.e. residuals).
+1.  Use MCMC samples from model5.3 to compute the MCMC sample of $\epsilon[n] = Y[n] - \mu[n]$ for each n (reading this as error for subject).
 
 ```{r q1}
 
+# get the beta values from the fitted model
+beta_draws <- fit.5.3$draws('b', format = 'matrix')
+
 # get the mean values from the fit summary and multiply by the predictor matrix
-mu <- rowSums(as.matrix(data_5.1[, 1:3]) * fit.5.3$summary('b')$mean)
+pred_X <- as.matrix(data_5.1[, 1:3])
 
-epsilon <- data_5.1$Y - mu
+# apply a little matrix algrebra (I think this is correct)
+mu <- as.matrix(pred_X %*% t(beta_draws))
 
-head(epsilon)
+epsilon <- apply(
+  mu, 1, 
+  function(mu) quantile(data_5.1$Y - mu, prob=c(0.1, 0.5, 0.9)) 
+  )
+
+head(t(epsilon))
 ```
 
 2.  Modify model 5.3 to generate $\epsilon[n]$ in generated quantities block.
 
+    Some notes: Looks like epislon from the generated quantities block doesn't match the estimated mu from the mean of the parameters. Couldn't get it to match exactly and don't want to spend anymore time on it.
+
 ```{r model5.3_epsilon}
 # load model
 model.5.3 = cmdstan_model(
-  stan_file = './05-glm/stan/model5-3.stan'
+  stan_file = './stan/model5-3.stan'
   )
 
 # fit model to observed data
 fit.5.3.epsilon = model.5.3$sample(data = d, seed = 123, parallel_chains = 4)
 
-epsilon_gq <- apply(fit.5.3.epsilon$draws('epsilon', format='matrix'), 2, mean)
+epsilon_gq <- apply(
+  fit.5.3.epsilon$draws('epsilon', format='matrix'), 
+  2, quantile, prob=c(0.1, 0.5, 0.9)
+  )
 
-head(epsilon_gq)
-
-cbind(epsilon, epsilon_gq)
-
+head(t(epsilon_gq))
 ```
+
+Error looks different for each N??? Not really sure what is going on. Might be off. Will return to it later.
 
 3\.
